@@ -1,0 +1,21 @@
+[
+  {
+    "name": "Known defects",
+    "matchedStatuses": ["failed", "broken"],
+    "messageRegex": ".*\\[KNOWN-DEFECT\\].*"
+  },
+  {
+    "name": "Test setup failures",
+    "matchedStatuses": ["broken"],
+    "traceRegex": ".*SetupFailedException.*"
+  },
+  {
+    "name": "Automation infrastructure failures",
+    "matchedStatuses": ["broken"],
+    "messageRegex": ".*(timed out|Connection refused|Login failed|ConditionTimeout|UnknownHost).*"
+  },
+  {
+    "name": "Application defects",
+    "matchedStatuses": ["failed"]
+  }
+]

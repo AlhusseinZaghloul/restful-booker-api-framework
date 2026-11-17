@@ -35,10 +35,11 @@ The architecture, patterns, naming, folder layout, logging, reporting, cleanup a
 | O18 | §1 tree / dependencies | **Not used:** `DatabaseUtils` (no DB access to a public API), Awaitility (the API is synchronous, so there is nothing to poll; Rule 3.6 still forbids `Thread.sleep`), WireMock (no downstream dependencies to virtualize, Appendix B). | Not applicable |
 | O19 | Rule 6.8 / §6.2 sample | `TransientRetryAnalyzer` is attached to **every** `@Test` and checks the whole cause chain for `SocketTimeoutException` / `ConnectException` (REST Assured may wrap them). Max 1 retry is unchanged. | Shared public Heroku host |
 | O20 | Rule 1.4 | `BookingDates` (a nested record shared by payload and response DTOs) has no `Payload`/`Response` suffix and carries both `@JsonInclude(NON_NULL)` and `@JsonIgnoreProperties(ignoreUnknown = true)`. | A single shared type avoids duplicated DTOs (Rule 2.5 composition) |
-| O21 | Rule 2.10 | `Accept: application/json` is sent explicitly, as in the Standards. Note: the probe showed JSON even without `Accept`, but the docs require it. | Quirk list says "must send"; harmless |
+| O21 | Rule 2.10 | `Accept` is set to exactly `application/json` with `setAccept("application/json")`, **not** `setAccept(ContentType.JSON)` as in the Standards sample. | `ContentType.JSON` sends `application/json, application/javascript, text/javascript, text/json`, and restful-booker answers any multi-value `Accept` with **418** on every endpoint (verified at build time, 2026-11-17) |
 | O22 | §4.7 categories | Known-defect contract tests use TestNG `Assert.assertEquals(actual, expected, "[KNOWN-DEFECT] RB-DEF-xxx: …")` (hard assert), not `ResponseSpecFactory`. REST Assured's own messages cannot carry the prefix that `categories.json` matches. | O7 regex must match |
 | O23 | Rule 3.14 | Tests whose **system under test is `POST /auth` itself** (`CreateTokenTest`: TC-AUTH-001, TC-NEG-001, TC-SCH-001, TC-SCH-002; and `ManageBookingTest#issuedToken_authorizesUpdate`, TC-E2E-003) send `CreateTokenRequest` directly. No other test logs in: every other authenticated call gets its token from `TokenManager`. | Rule 3.14 targets logins used as setup; here the login *is* the behavior being tested |
 | O24 | §4 `categories.json` sample | (a) "Known defects" is the first entry and matches `failed` **and** `broken` (O7). (b) The "Automation infrastructure failures" regex adds `UnknownHost` to the Standards list: `.*(timed out\|Connection refused\|Login failed\|ConditionTimeout\|UnknownHost).*`. | (a) a known defect can surface as an exception, not only an assertion; (b) DNS failures on the CI runner are infrastructure, not product defects |
+| O25 | Rule 1.8 / O9 (latest stable) | `maven-surefire-plugin` is pinned to **3.5.6**, the latest 3.5.x release, not 3.6.1. | Surefire 3.6.0+ runs TestNG on the JUnit Platform and rejects `suiteXmlFiles` ("not supported since 3.6.0"). The suite XMLs (O8, Rule 6.5) and the `-Dsuite=` selection depend on it. Found at build time on 2026-11-17; decided by the user |
 
 ---
 
@@ -184,7 +185,7 @@ Verified on Maven Central (`repo1.maven.org/maven2/.../maven-metadata.xml`, stab
 | groupId | artifactId | Version | JDK 25 | Configuration |
 |---|---|---|---|---|
 | `org.apache.maven.plugins` | `maven-compiler-plugin` | 3.16.0 | Yes (prereq Maven 3.6.3) | `<release>25</release>`, `<proc>full</proc>`, `annotationProcessorPaths` → `lombok:${lombok.version}` |
-| `org.apache.maven.plugins` | `maven-surefire-plugin` | 3.6.1 | Yes | `<suiteXmlFiles><suiteXmlFile>${suite}</suiteXmlFile></suiteXmlFiles>`; property `suite` defaults to `src/test/resources/suites/regression.xml`; `<systemPropertyVariables><allure.results.directory>${project.build.directory}/allure-results</allure.results.directory></systemPropertyVariables>` |
+| `org.apache.maven.plugins` | `maven-surefire-plugin` | 3.5.6 (O25) | Yes | `<suiteXmlFiles><suiteXmlFile>${suite}</suiteXmlFile></suiteXmlFiles>`; property `suite` defaults to `src/test/resources/suites/regression.xml`; `<systemPropertyVariables><allure.results.directory>${project.build.directory}/allure-results</allure.results.directory></systemPropertyVariables>` |
 | `io.qameta.allure` | `allure-maven` | 3.1.0 | Yes | `<reportVersion>2.46.2</reportVersion>` (O17), `<resultsDirectory>allure-results</resultsDirectory>`, `<reportDirectory>${project.build.directory}/allure-report</reportDirectory>` |
 | `io.qameta.allure` | `allure-commandline` | 2.46.2 | Yes (runs on any JDK ≥ 8) | Downloaded by `allure-maven`; not a project dependency |
 
@@ -521,6 +522,7 @@ Observed against the live API on 2026-11-17 (probe bookings were all deleted aft
 | RB-DEF-005 | `PUT`/`PATCH`/`DELETE /booking/{id}` with non-existent id (also a repeat DELETE) | 404 (REST) | **405** | TC-NEG-007 (`DELETE`) | TC-NEG-008 |
 | RB-DEF-006 | `GET /booking?checkin=` | `checkin >= param` (docs) | `checkin > param` (strict: the boundary date is excluded) | TC-BKG-010 | — (outside O6) |
 | RB-DEF-007 | `GET /booking?checkout=` | `checkout >= param` (docs) | `checkout <= param` (inverted) | TC-BKG-011 | — (outside O6) |
+| RB-DEF-008 | All endpoints, multi-value `Accept` (e.g. `application/json, application/javascript, text/javascript, text/json`) | 200 when `application/json` is among the accepted types; at most 406 (REST) | **418** I'm a teapot | — observed, not automated; the framework always sends exactly `application/json`, see O21 | — observed, not automated; the framework always sends exactly `application/json`, see O21 |
 
 ### REST-convention notes (docs-conformant, not defects)
 

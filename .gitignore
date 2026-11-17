@@ -1,0 +1,6 @@
+target/
+logs/
+.idea/
+*.iml
+# allure-maven 3.x: downloaded report tool and local history cache
+.allure/

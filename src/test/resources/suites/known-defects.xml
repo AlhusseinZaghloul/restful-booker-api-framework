@@ -1,0 +1,15 @@
+<!DOCTYPE suite SYSTEM "https://testng.org/testng-1.1.dtd">
+<!-- Non-blocking: contract-expectation tests for known API defects (O7). They fail until the API is fixed. -->
+<suite name="api-known-defects" parallel="classes" thread-count="4">
+    <test name="known-defects">
+        <groups>
+            <run>
+                <include name="known-defect"/>
+                <exclude name="quarantine"/>
+            </run>
+        </groups>
+        <packages>
+            <package name="io.github.alhusseinzaghloul.restfulbooker.tests.*"/>
+        </packages>
+    </test>
+</suite>

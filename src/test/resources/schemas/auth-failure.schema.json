@@ -1,0 +1,11 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "POST /auth bad credentials (RB-DEF-001)",
+  "type": "object",
+  "required": ["reason"],
+  "properties": {
+    "reason": { "type": "string", "minLength": 1 }
+  },
+  "not": { "required": ["token"] },
+  "additionalProperties": true
+}
