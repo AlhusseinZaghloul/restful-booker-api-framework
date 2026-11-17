@@ -6,6 +6,7 @@ Layered Java API test automation for the public [restful-booker](https://restful
 
 - **Design:** [ARCHITECTURE_BLUEPRINT.md](ARCHITECTURE_BLUEPRINT.md) (architecture, overrides, class contracts) and [TEST_CASES_MATRIX.md](TEST_CASES_MATRIX.md) (36 test cases).
 - **Standards:** [docs/STANDARDS.md](docs/STANDARDS.md), with the short rule list in [docs/RULES_DIGEST.md](docs/RULES_DIGEST.md).
+- **Design decisions:** [docs/DESIGN_DECISIONS.md](docs/DESIGN_DECISIONS.md) (ADRs: context, options, decision, consequences).
 - **Latest report:** <https://alhusseinzaghloul.github.io/restful-booker-api-framework/> (published by CI from `main`).
 
 ## Architecture
@@ -67,8 +68,16 @@ src/test/resources/
 - Maven 3.9+
 - The `AUTH_PASSWORD` environment variable. The demo password is published in the [API docs](https://restful-booker.herokuapp.com/apidoc/index.html). It is never committed.
 
+Bash (Linux, macOS, Git Bash):
+
 ```bash
 export AUTH_PASSWORD='<password from the API docs>'
+```
+
+PowerShell (Windows):
+
+```powershell
+$env:AUTH_PASSWORD = '<password from the API docs>'
 ```
 
 ## Running
@@ -124,6 +133,62 @@ Values resolve in this order: `-Dkey=value` system property → environment vari
 5. On `main` pushes, the report is deployed to [GitHub Pages](https://alhusseinzaghloul.github.io/restful-booker-api-framework/).
 
 Repository setup: add the `AUTH_PASSWORD` secret, and set **Settings → Pages → Source** to "GitHub Actions".
+
+## Design decisions
+
+Full records with the options considered: [docs/DESIGN_DECISIONS.md](docs/DESIGN_DECISIONS.md).
+
+- **One class per API request** (`CreateBookingRequest`, `GetBookingIdsRequest`, …), with mandatory inputs as constructor arguments.
+  *Trade-off:* more classes, but an API change touches one class and an incomplete request does not compile.
+- **No `BaseTest`.** One `SuiteLifecycleListener`, registered through `ServiceLoader`, runs the health check, the sweep, per-test cleanup and report files.
+  *Trade-off:* the lifecycle cannot be left out of any run, but it is not visible from the test code.
+- **Automatic cleanup plus a marker sweep.** Create requests register their own delete; leftovers marked `lastname = QA-AUTO` are swept at suite start.
+  *Trade-off:* tests contain no cleanup code, but the sweep also deletes the bookings of an overlapping run.
+- **Dual tests for API deviations.** An actual-behavior test guards the gate; a `[KNOWN-DEFECT]` contract test runs in a non-blocking suite.
+  *Trade-off:* the gate stays green and still detects changes, but a fixed API means updating two tests.
+- **Configurable `auth.type`** (`none`, `cookie-token`, `bearer`), with one cached login per run in `TokenManager`.
+  *Trade-off:* reusable for other APIs, but the `bearer` path has not run against a real bearer API.
+- **`DiagnosticFilter` as the single telemetry source**, masking headers, cookies and secret body fields for both Allure and the log.
+  *Trade-off:* every call is diagnosable from the report, but new secret field names must be added to the mask pattern.
+- **Records with Lombok builders**, plus typed DTOs for wrong-type payloads and constants for malformed JSON.
+  *Trade-off:* concise, immutable test data, but Lombok must be configured as an annotation processor.
+- **Parallel by class** (4 threads), with per-thread cleanup queues and `Faker` instances.
+  *Trade-off:* a full regression run takes about 40 seconds, but shared data in `@BeforeClass` and `@Test(timeOut)` are not allowed.
+
+## Engineering challenges solved
+
+**HTTP 418 on every request.**
+*Symptom:* 24 of 32 tests failed because `POST /booking` returned 418 "I'm a teapot", while the same call with curl returned 200.
+*Root cause:* `setAccept(ContentType.JSON)` sends four media types (`application/json, application/javascript, …`), and the API answers any multi-value `Accept` with 418. *Fix:* send exactly `Accept: application/json` (O21); recorded as RB-DEF-008.
+
+**Surefire 3.6.1 does not run TestNG suite files.**
+*Symptom:* `mvn test` failed before any test ran: "Parameter suiteXmlFiles is not supported since 3.6.0".
+*Root cause:* Surefire 3.6 runs TestNG on the JUnit Platform, which cannot read TestNG suite XML. *Fix:* pin Surefire 3.5.6, the latest release that supports suite files (O25).
+
+**405 on an already-deleted booking.**
+*Symptom:* any test that deletes its own booking would leave a false "cleanup failure", because the automatic cleanup tries the delete again.
+*Root cause:* the API returns 405, not 404, for an id that no longer exists, and Rule 3.19 treats only 404 as "already gone". *Fix:* a per-request `isAlreadyGone()` hook; `DeleteBookingRequest` accepts 404 and 405 (O12).
+
+**The token cookie was outside header masking.**
+*Symptom:* the Standards filter only describes headers, so the token cookie was missing from the report, and any later change that printed cookies would have leaked it.
+*Root cause:* REST Assured keeps cookies separately from headers. *Fix:* `DiagnosticFilter` prints `request.getCookies()` with masked values, also in the cURL attachment (O14). Verified: every report shows `Cookie: token=***`, and the real password appears in no result or log file.
+
+**Known defects reported as "Product defects".**
+*Symptom:* the Allure report ignored the custom categories and put the four known-defect failures under its default category.
+*Root cause:* writing `categories.json` through a shell heredoc turned `\\[` into `\[`, an invalid JSON escape, and Allure silently skipped the file. *Fix:* rewrote the file with exact content and validated every JSON resource with a parser.
+
+**Date filters that contradict the docs.**
+*Symptom:* filter tests built from the docs (`checkin >= date`, `checkout >= date`) would include or exclude bookings unexpectedly.
+*Root cause:* the API filters `checkin > date` (strict) and `checkout <= date` (inverted), confirmed with two separate probe bookings. *Fix:* positive tests use boundary values that pass under both meanings; TC-BKG-010/011 pin the real behavior (RB-DEF-006/007).
+
+## Limitations and next steps
+
+- **Shared public API.** Tests run against a demo server that other people use and that is reset periodically, so latency and occasional failures are outside our control. Next: run the suites against a local restful-booker container, with WireMock for failure cases.
+- **Overlapping runs.** The marker sweep deletes every `QA-AUTO` booking, so two runs from different machines can delete each other's data. CI runs are serialized; next: a per-run marker (for example the CI run id) in the lastname.
+- **One environment.** Only `config/dev.properties` exists. Next: a staging config and an environment matrix in CI.
+- **Thin negative coverage, by design.** There is one representative test per negative category (Rule 2.15); PATCH/DELETE permutations, XML and form-encoded bodies, and RB-DEF-008 are not automated.
+- **Actual-behavior tests lock in API bugs.** When the API is fixed, the gate turns red until each actual-behavior test and its contract test are updated together.
+- **Surefire is pinned to 3.5.x.** Next: move from suite XMLs to group selection or a JUnit Platform `@Suite`, so Surefire 3.6+ can be used.
 
 ## Known deviations
 
